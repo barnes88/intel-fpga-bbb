@@ -226,7 +226,7 @@ module app_afu
                                          t_cci_mdata'(0),
                                          cci_mpf_defaultReqHdrParams());
 
-    assign fiu.c1Tx.data = t_ccip_c1Data'(write_message);
+    assign fiu.c1Tx.data = t_ccip_clData'(write_message);
 
     // Control logic for memory writes
     always_ff @(posedge clk)
@@ -238,7 +238,7 @@ module app_afu
         else
         begin
             // Request the write as long as the channel isn't full.
-            fiu.c1Tx.valid <= ((state == STATE_RUN) && ! fiu.c1TxAlmFull);
+            fiu.c1Tx.valid <= ((state == STATE_WRITE) && ! fiu.c1TxAlmFull);
         end
 
         fiu.c1Tx.hdr <= wr_hdr;
