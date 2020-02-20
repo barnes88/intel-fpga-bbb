@@ -139,7 +139,7 @@ module app_afu
             begin
                 state <= STATE_READ;
                 $display("AFU Reading...");
-                rd_needed <= 0;
+                rd_needed <= 1'b1;
             end
 
             // The AFU READS data into SRAM
@@ -147,7 +147,7 @@ module app_afu
             begin
                 state <= STATE_WRITE;
                 $display("AFU Writing...");
-                rd_needed <= 1'b1;
+                rd_needed <= 1'b0;
             end
 
             // The AFU Writes SHARED_MEM_SIZE data back to the shared buffer after adding 1 
@@ -248,7 +248,6 @@ module app_afu
     //
     // This AFU never handles MMIO reads.
     //
-    assign fiu.c0Tx.valid = 1'b0;
     assign fiu.c2Tx.mmioRdValid = 1'b0;
 
 endmodule // app_afu

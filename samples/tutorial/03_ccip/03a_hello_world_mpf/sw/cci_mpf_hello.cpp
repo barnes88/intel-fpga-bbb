@@ -60,9 +60,10 @@ int main(int argc, char *argv[])
     assert(NULL != buf);
 
     // Write a page worth of data to accelerator
-    for (int i = 0; i < getpagesize(); i++) {
-        buf[i] = i
-    }
+    buf[0] = 0;
+    /* for (int i = 0; i < getpagesize(); i++) { */
+    /*     buf[i] = i; */
+    /* } */
 
     // Initializes csr 2 to 0, will use to indicate AFU is finished
     // csrs.writeCSR(2, 0)
