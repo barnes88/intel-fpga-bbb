@@ -59,9 +59,13 @@ int main(int argc, char *argv[])
     uint64_t buf_pa = buf_handle->io_address();
     assert(NULL != buf);
 
-    // Set the low byte of the shared buffer to 0.  The FPGA will write
-    // a non-zero value to it.
-    buf[0] = 0;
+    // Write a page worth of data to accelerator
+    for (int i = 0; i < getpagesize(); i++) {
+        buf[i] = i
+    }
+
+    // Initializes csr 2 to 0, will use to indicate AFU is finished
+    csrs.writeCSR(2, 0)
 
     // Tell the accelerator the address of the buffer using cache line
     // addresses by writing to application CSR 0.  The CSR manager maps
@@ -70,14 +74,20 @@ int main(int argc, char *argv[])
     csrs.writeCSR(0, buf_pa / CL(1));
 
     // Spin, waiting for the value in memory to change to something non-zero.
-    while (0 == buf[0])
+   // while (0 == buf[0])
+   
+    // Spin, waiting for the last bit of CSR 1 to flip from 0 to 1
+    while (!(csrs.readCSR(2) & 0x01))
     {
         // A well-behaved program would use _mm_pause(), nanosleep() or
         // equivalent to save power here.
     };
 
     // Print the string written by the FPGA
-    cout << (char*)buf << endl;
+    //cout << (char*)buf << endl;
+    for (int i = 0; i < getpagesize(); i++) {
+        cout << buf[i];
+    }
 
     // Ask the FPGA-side CSR manager the AFU's frequency
     cout << endl

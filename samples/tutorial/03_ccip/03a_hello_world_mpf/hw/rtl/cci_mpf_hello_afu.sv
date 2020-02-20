@@ -32,6 +32,8 @@
 `include "csr_mgr.vh"
 `include "afu_json_info.vh"
 
+//`define SHARED_MEM_SIZE 1024
+//`define SHARED_MEM_BITS $clog2(SHARED_MEM_SIZE)
 
 module app_afu
    (
@@ -45,8 +47,8 @@ module app_afu
 
     // MPF tracks outstanding requests.  These will be true as long as
     // reads or unacknowledged writes are still in flight.
-    input  logic c0NotEmpty,
-    input  logic c1NotEmpty
+    input  logic c0NotEmpty, // Memory read channel
+    input  logic c1NotEmpty  // Memory write channel
     );
 
     // Local reset to reduce fan-out
@@ -87,7 +89,7 @@ module app_afu
     logic is_mem_addr_csr_write;
     assign is_mem_addr_csr_write = csrs.cpu_wr_csrs[0].en;
 
-    // Memory address to which this AFU will write.
+    // Memory address to which this AFU will read / write.
     t_ccip_clAddr mem_addr;
 
     always_ff @(posedge clk)
@@ -108,50 +110,114 @@ module app_afu
     //
     // States in our simple example.
     //
-    typedef enum logic [0:0]
+    typedef enum logic [1:0]
     {
         STATE_IDLE,
-        STATE_RUN
-    }
-    t_state;
+        STATE_READ,
+        STATE_WRITE
+    } t_state;
 
     t_state state;
 
     //
     // State machine
     //
+    logic rd_needed;
+
     always_ff @(posedge clk)
     begin
         if (reset)
         begin
             state <= STATE_IDLE;
+            rd_needed <= 1'b0;
         end
         else
         begin
             // Trigger the AFU when mem_addr is set above.  (When the CPU
-            // tells us the address to which the FPGA should write a message.)
+            // tells us the address of the FPGA shared memory buffer 
             if ((state == STATE_IDLE) && is_mem_addr_csr_write)
             begin
-                state <= STATE_RUN;
-                $display("AFU running...");
+                state <= STATE_READ;
+                $display("AFU Reading...");
+                rd_needed <= 0;
             end
 
-            // The AFU completes its task by writing a single line.  When
-            // the line is written return to idle.  The write will happen
-            // as long as the request channel is not full.
-            if ((state == STATE_RUN) && ! fiu.c1TxAlmFull)
+            // The AFU READS data into SRAM
+            if ((state == STATE_READ && cci_c0Rx_isReadRsp(fiu.c0Rx)) )
+            begin
+                state <= STATE_WRITE;
+                $display("AFU Writing...");
+                rd_needed <= 1'b1;
+            end
+
+            // The AFU Writes SHARED_MEM_SIZE data back to the shared buffer after adding 1 
+            if ((state == STATE_WRITE) && !fiu.c1TxAlmFull)
             begin
                 state <= STATE_IDLE;
-                $display("AFU done...");
+                $display("AFU FINISHED");
+                rd_needed <= 1'b0;
             end
+
+       end
+    end
+
+
+    //
+    // Read shared memory into SRAM when in STATE_RUN 
+    //
+    
+    // Construct a memory read header
+    t_cci_mpf_c0_ReqMemHdr rd_hdr;
+    t_cci_mpf_ReqMemHdrParams rd_hdr_params;
+    //t_ccip_clAddr rd_addr;
+
+    always_comb
+    begin
+        // Use Physical addresses
+        rd_hdr_params = cci_mpf_defaultReqHdrParams(0);
+        // Let FIU pick the channel
+        //rd_hdr_params.vc_sel = eVC_VA;
+        // Read 1 line
+        //rd_hdr_params.cl_len = eCL_LEN_1;
+
+        // Generate the header
+        rd_hdr = cci_mpf_c0_genReqHdr(  eREQ_RDLINE_I,
+                                        mem_addr,
+                                        t_cci_mdata'(0),
+                                        rd_hdr_params);
+    end
+
+    // Send read requests to FIU
+    always_ff @(posedge clk)
+    begin
+        if (reset)
+        begin
+            fiu.c0Tx.valid <= 1'b0;
+        end
+        else begin
+            // Generate a read request when FIU isn't full
+            fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, (!fiu.c0TxAlmFull && rd_needed));
+        end
+    end 
+
+
+    // Read Response handling
+    logic [63:0] write_message;
+
+    always_ff @(posedge clk) 
+    begin
+        if (cci_c0Rx_isReadRsp(fiu.c0Rx))
+        begin
+            $display("  Read data %0d", fiu.c0Rx.data[63:0]);
+            write_message <= fiu.c0Rx.data[63:0] + 1'b1;
         end
     end
 
 
     //
-    // Write "Hello world!" to memory when in STATE_RUN.
+    // Write shared memory from SRAM back to shared buf in STATE_WRITE
     //
-
+    
     // Construct a memory write request header.  For this AFU it is always
     // the same, since we write to only one address.
     t_cci_mpf_c1_ReqMemHdr wr_hdr;
@@ -160,8 +226,7 @@ module app_afu
                                          t_cci_mdata'(0),
                                          cci_mpf_defaultReqHdrParams());
 
-    // Data to write to memory: little-endian ASCII encoding of "Hello world!"
-    assign fiu.c1Tx.data = t_ccip_clData'('h0021646c726f77206f6c6c6548);
+    assign fiu.c1Tx.data = t_ccip_c1Data'(write_message);
 
     // Control logic for memory writes
     always_ff @(posedge clk)
@@ -181,7 +246,7 @@ module app_afu
 
 
     //
-    // This AFU never makes a read request or handles MMIO reads.
+    // This AFU never handles MMIO reads.
     //
     assign fiu.c0Tx.valid = 1'b0;
     assign fiu.c2Tx.mmioRdValid = 1'b0;
