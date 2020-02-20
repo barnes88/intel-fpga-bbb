@@ -196,7 +196,11 @@ module app_afu
         end
         else begin
             // Generate a read request when FIU isn't full
-            fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, (!fiu.c0TxAlmFull && rd_needed));
+            if (!fiu.c0TxAlmFull && rd_needed) begin
+                fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1);
+                $display("  Sent Read request");
+                rd_needed <= 1'b0;
+            end
         end
     end 
 
