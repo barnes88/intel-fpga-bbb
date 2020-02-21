@@ -89,7 +89,7 @@ module app_afu
     logic is_mem_addr_csr_write;
     assign is_mem_addr_csr_write = csrs.cpu_wr_csrs[0].en;
 
-    // Memory address to which this AFU will read / write.
+    // Memory address to which this AFU will read 
     t_ccip_clAddr mem_addr;
 
     always_ff @(posedge clk)
@@ -99,6 +99,14 @@ module app_afu
             mem_addr <= t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data);
         end
     end
+
+    // Use CSR 1 to set memory address for which AFU will write
+    logic is_mem_addr_csr_write1;
+    assign is_mem_addr_csr_write1 = csrs.cpu_wr_csrs[1].en;
+    t_ccip_clAddr write_addr;
+
+    always_ff @(posedge clk)
+        write_addr <= t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data);
 
 
     // =========================================================================
@@ -114,7 +122,8 @@ module app_afu
     {
         STATE_IDLE,
         STATE_READ,
-        STATE_WRITE
+        STATE_WRITE,
+        STATE_FINISHED
     } t_state;
 
     t_state state;
@@ -153,8 +162,13 @@ module app_afu
             // The AFU Writes SHARED_MEM_SIZE data back to the shared buffer after adding 1 
             if ((state == STATE_WRITE) && !fiu.c1TxAlmFull)
             begin
-                state <= STATE_IDLE;
+                state <= STATE_FINISHED;
                 $display("AFU FINISHED");
+                rd_needed <= 1'b0;
+            end
+
+            if(state == STATE_FINISHED)
+            begin
                 rd_needed <= 1'b0;
             end
 
@@ -178,7 +192,7 @@ module app_afu
         // Let FIU pick the channel
         //rd_hdr_params.vc_sel = eVC_VA;
         // Read 1 line
-        //rd_hdr_params.cl_len = eCL_LEN_1;
+        // rd_hdr_params.cl_len = eCL_LEN_1;
 
         // Generate the header
         rd_hdr = cci_mpf_c0_genReqHdr(  eREQ_RDLINE_I,
@@ -197,10 +211,12 @@ module app_afu
         else begin
             // Generate a read request when FIU isn't full
             if (!fiu.c0TxAlmFull && rd_needed) begin
-                fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1);
+                fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b1);
                 $display("  Sent Read request");
                 rd_needed <= 1'b0;
             end
+            else
+                fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b0);
         end
     end 
 
@@ -214,8 +230,10 @@ module app_afu
         begin
             $display("  Read data %0d", fiu.c0Rx.data[63:0]);
             write_message <= fiu.c0Rx.data[63:0] + 1'b1;
+            rd_needed <= 1'b0;
         end
     end
+    
 
 
     //
@@ -226,7 +244,7 @@ module app_afu
     // the same, since we write to only one address.
     t_cci_mpf_c1_ReqMemHdr wr_hdr;
     assign wr_hdr = cci_mpf_c1_genReqHdr(eREQ_WRLINE_I,
-                                         mem_addr,
+                                         write_addr,
                                          t_cci_mdata'(0),
                                          cci_mpf_defaultReqHdrParams());
 

@@ -53,14 +53,22 @@ int main(int argc, char *argv[])
     // Connect the CSR manager
     CSR_MGR csrs(fpga);
 
-    // Allocate a single page memory buffer
+    // Allocate a single page memory buffer (AFU will read from)
     auto buf_handle = fpga.allocBuffer(getpagesize());
     auto buf = reinterpret_cast<volatile char*>(buf_handle->c_type());
     uint64_t buf_pa = buf_handle->io_address();
     assert(NULL != buf);
 
-    // Write a page worth of data to accelerator
-    buf[0] = 0;
+    // Allocate a single page memory buffer (AFU will read from)
+    auto out_buf_handle = fpga.allocBuffer(getpagesize());
+    auto out_buf = reinterpret_cast<volatile char*>(out_buf_handle->c_type());
+    uint64_t out_buf_pa = out_buf_handle->io_address();
+    assert(NULL != out_buf);
+
+    // Write a 1 to accelerator
+    buf[0] = 1;
+    out_buf[0] = 0;
+
     /* for (int i = 0; i < getpagesize(); i++) { */
     /*     buf[i] = i; */
     /* } */
@@ -73,9 +81,10 @@ int main(int argc, char *argv[])
     // its registers to MMIO space.  The accelerator will respond by
     // writing to the buffer.
     csrs.writeCSR(0, buf_pa / CL(1));
+    csrs.writeCSR(1, out_buf_pa / CL(1));
 
     // Spin, waiting for the value in memory to change to something non-zero.
-    while (0 == buf[0])
+    while (0 == out_buf[0])
    
     // Spin, waiting for the last bit of CSR 1 to flip from 0 to 1
     // while (!(csrs.readCSR(2) & 0x01))
@@ -86,7 +95,7 @@ int main(int argc, char *argv[])
 
     // Print the string written by the FPGA
     //cout << (char*)buf << endl;
-    cout << "OUTPUT WAS: " << buf[0] << endl;
+    cout << "OUTPUT WAS: " << (long*)out_buf[0] << endl;
    // for (int i = 0; i < getpagesize(); i++) {
    //     cout << buf[i];
    // }
