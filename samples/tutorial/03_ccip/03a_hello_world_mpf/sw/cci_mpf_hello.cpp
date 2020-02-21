@@ -84,10 +84,10 @@ int main(int argc, char *argv[])
     csrs.writeCSR(1, out_buf_pa / CL(1));
 
     // Spin, waiting for the value in memory to change to something non-zero.
-    while (0 == out_buf[0])
+    //while (0 == out_buf[0])
    
     // Spin, waiting for the last bit of CSR 1 to flip from 0 to 1
-    // while (!(csrs.readCSR(2) & 0x01))
+    while (!(csrs.readCSR(0) & 0x01))
     {
         // A well-behaved program would use _mm_pause(), nanosleep() or
         // equivalent to save power here.
