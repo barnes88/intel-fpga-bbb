@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
 
     // Write a 1 to accelerator
     buf[0] = 1;
-    out_buf[0] = 0;
+    //out_buf[0] = 0;
 
     /* for (int i = 0; i < getpagesize(); i++) { */
     /*     buf[i] = i; */
@@ -80,14 +80,14 @@ int main(int argc, char *argv[])
     // addresses by writing to application CSR 0.  The CSR manager maps
     // its registers to MMIO space.  The accelerator will respond by
     // writing to the buffer.
-    csrs.writeCSR(0, buf_pa / CL(1));
     csrs.writeCSR(1, out_buf_pa / CL(1));
+    csrs.writeCSR(0, buf_pa / CL(1));
 
     // Spin, waiting for the value in memory to change to something non-zero.
-    //while (0 == out_buf[0])
+    while (0 == out_buf[0])
    
     // Spin, waiting for the last bit of CSR 1 to flip from 0 to 1
-    while (!(csrs.readCSR(0) & 0x01))
+    //while (!(csrs.readCSR(0) && 0x01))
     {
         // A well-behaved program would use _mm_pause(), nanosleep() or
         // equivalent to save power here.
@@ -96,6 +96,7 @@ int main(int argc, char *argv[])
     // Print the string written by the FPGA
     //cout << (char*)buf << endl;
     cout << "OUTPUT WAS: " << (long*)out_buf[0] << endl;
+    cout << "CSR0 output was " << csrs.readCSR(0) << endl;
    // for (int i = 0; i < getpagesize(); i++) {
    //     cout << buf[i];
    // }

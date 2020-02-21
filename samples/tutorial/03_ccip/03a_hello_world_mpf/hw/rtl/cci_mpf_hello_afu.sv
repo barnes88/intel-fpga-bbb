@@ -65,22 +65,7 @@ module app_afu
     //
     // ====================================================================
 
-    always_comb
-    begin
-        // The AFU ID is a unique ID for a given program.  Here we generated
-        // one with the "uuidgen" program and stored it in the AFU's JSON file.
-        // ASE and synthesis setup scripts automatically invoke afu_json_mgr
-        // to extract the UUID into afu_json_info.vh.
-        csrs.afu_id = `AFU_ACCEL_UUID;
-
-        // Default
-        for (int i = 0; i < NUM_APP_CSRS; i = i + 1)
-        begin
-            csrs.cpu_rd_csrs[i].data = 64'(0);
-        end
-    end
-
-
+    
     //
     // Consume configuration CSR writes
     //
@@ -106,7 +91,10 @@ module app_afu
     t_ccip_clAddr write_addr;
 
     always_ff @(posedge clk)
-        write_addr <= t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data);
+        if (is_mem_addr_csr_write1) 
+        begin
+            write_addr <= t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data);
+        end
 
 
     // =========================================================================
@@ -132,6 +120,7 @@ module app_afu
     // State machine
     //
     logic rd_needed;
+    logic write_sent;
 
     always_ff @(posedge clk)
     begin
@@ -160,7 +149,7 @@ module app_afu
             end
 
             // The AFU Writes SHARED_MEM_SIZE data back to the shared buffer after adding 1 
-            if ((state == STATE_WRITE) && !fiu.c1TxAlmFull)
+            if ((state == STATE_WRITE) && !fiu.c1TxAlmFull && write_sent && !c1NotEmpty)
             begin
                 state <= STATE_FINISHED;
                 $display("AFU FINISHED");
@@ -173,6 +162,25 @@ module app_afu
             end
 
        end
+    end
+
+    //
+    // CSR0 written 1 when AFU is finished, otherwise write 0
+    //
+    always_comb
+    begin
+        // The AFU ID is a unique ID for a given program.  Here we generated
+        // one with the "uuidgen" program and stored it in the AFU's JSON file.
+        // ASE and synthesis setup scripts automatically invoke afu_json_mgr
+        // to extract the UUID into afu_json_info.vh.
+        csrs.afu_id = `AFU_ACCEL_UUID;
+
+        // Default
+        for (int i = 1; i < NUM_APP_CSRS; i = i + 1)
+        begin
+            csrs.cpu_rd_csrs[i].data = 64'(0);
+        end
+        csrs.cpu_rd_csrs[0].data = (state == STATE_FINISHED) ? 64'h1 : 64'h0;
     end
 
 
@@ -256,11 +264,17 @@ module app_afu
         if (reset)
         begin
             fiu.c1Tx.valid <= 1'b0;
+            write_sent <= 1'b0;
         end
         else
         begin
             // Request the write as long as the channel isn't full.
-            fiu.c1Tx.valid <= ((state == STATE_WRITE) && ! fiu.c1TxAlmFull);
+            fiu.c1Tx.valid <= ((state == STATE_WRITE) && ! fiu.c1TxAlmFull && !write_sent);
+            if ((state == STATE_WRITE) && ! fiu.c1TxAlmFull && !write_sent)
+            begin
+                write_sent <= 1'b1;
+                $display("  sent Write request to addr %0h", write_addr);
+            end
         end
 
         fiu.c1Tx.hdr <= wr_hdr;
