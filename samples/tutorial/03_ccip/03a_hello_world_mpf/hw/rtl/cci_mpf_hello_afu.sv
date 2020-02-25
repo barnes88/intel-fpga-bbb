@@ -32,6 +32,8 @@
 `include "csr_mgr.vh"
 `include "afu_json_info.vh"
 
+`include "rtl/TopLevel.v"
+
 //`define SHARED_MEM_SIZE 1024
 //`define SHARED_MEM_BITS $clog2(SHARED_MEM_SIZE)
 
@@ -221,7 +223,7 @@ module app_afu
             if (!fiu.c0TxAlmFull && rd_needed) begin
                 fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b1);
                 $display("  Sent Read request");
-                rd_needed <= 1'b0;
+               // rd_needed <= 1'b0;
             end
             else
                 fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b0);
@@ -238,7 +240,7 @@ module app_afu
         begin
             $display("  Read data %0d", fiu.c0Rx.data[63:0]);
             write_message <= fiu.c0Rx.data[63:0] + 1'b1;
-            rd_needed <= 1'b0;
+            //rd_needed <= 1'b0;
         end
     end
     
@@ -285,6 +287,28 @@ module app_afu
     // This AFU never handles MMIO reads.
     //
     assign fiu.c2Tx.mmioRdValid = 1'b0;
+
+    //
+    // Hookup Chisel Module it doesn't do anything right now
+    //
+
+    TopLevel assigntask (
+        .clock(clk),
+        .reset(reset),
+        .io_writeDataMem_wrEnable(),
+        .io_writeDataMem_wrAddr(),
+        .io_writeDataMem_wrData_0(),
+        .io_writeDataMem_wrData_1(),
+        .io_writeDataMem_wrData_2(),
+        .io_writeDataMem_wrData_3(),
+        .io_readIDMem_rdAddr(),
+        .io_readIDMem_rdData(),
+        .io_writeSharedMem_wrEnable(),
+        .io_writeSharedMem_wrAddr(),
+        .io_writeSharedMem_wrData(),
+        .io_startWorking(1'b0),
+        .io_doneWorking()
+    );
 
 endmodule // app_afu
 

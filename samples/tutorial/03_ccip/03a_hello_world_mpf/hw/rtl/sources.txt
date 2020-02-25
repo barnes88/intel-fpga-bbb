@@ -4,3 +4,14 @@ C:../../../base/hw/rtl/base_sources.txt
 
 +incdir+.
 cci_mpf_hello_afu.sv
+
+rtl/addRecFN.v
+rtl/HardFloat_consts.v
+rtl/HardFloat_localFuncs.v
+rtl/HardFloat_primitives.v
+rtl/HardFloat_rawFN.v
+rtl/HardFloat_specialize.v
+rtl/HardFloat_specialized.v
+rtl/isSigNaNRecFN.v
+rtl/mulRecFN.v
+rtl/TopLevel.v
