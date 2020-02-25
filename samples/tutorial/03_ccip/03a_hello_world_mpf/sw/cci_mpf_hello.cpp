@@ -55,13 +55,13 @@ int main(int argc, char *argv[])
 
     // Allocate a single page memory buffer (AFU will read from)
     auto buf_handle = fpga.allocBuffer(getpagesize());
-    auto buf = reinterpret_cast<volatile char*>(buf_handle->c_type());
+    auto buf = reinterpret_cast<volatile unsigned long long*>(buf_handle->c_type());
     uint64_t buf_pa = buf_handle->io_address();
     assert(NULL != buf);
 
     // Allocate a single page memory buffer (AFU will read from)
     auto out_buf_handle = fpga.allocBuffer(getpagesize());
-    auto out_buf = reinterpret_cast<volatile char*>(out_buf_handle->c_type());
+    auto out_buf = reinterpret_cast<volatile unsigned long long*>(out_buf_handle->c_type());
     uint64_t out_buf_pa = out_buf_handle->io_address();
     assert(NULL != out_buf);
 
@@ -69,9 +69,11 @@ int main(int argc, char *argv[])
     buf[0] = 1;
     //out_buf[0] = 0;
 
-    /* for (int i = 0; i < getpagesize(); i++) { */
-    /*     buf[i] = i; */
-    /* } */
+    // Write 4 cache-lines worth of data to accelerator (1-CL = 64 Bytes = 16 Ints = 8 long longs)
+    // top 256 bits should be padded with 0
+    for (int i = 0; i < 32; i++) {
+         buf[i] = static_cast<unsigned long long>(i);
+     }
 
     // Initializes csr 2 to 0, will use to indicate AFU is finished
     // csrs.writeCSR(2, 0)
@@ -85,7 +87,7 @@ int main(int argc, char *argv[])
 
     // Spin, waiting for the value in memory to change to something non-zero.
     while (0 == out_buf[0])
-   
+
     // Spin, waiting for the last bit of CSR 1 to flip from 0 to 1
     //while (!(csrs.readCSR(0) && 0x01))
     {
@@ -95,11 +97,11 @@ int main(int argc, char *argv[])
 
     // Print the string written by the FPGA
     //cout << (char*)buf << endl;
-    cout << "OUTPUT WAS: " << (long*)out_buf[0] << endl;
+    for (int i = 0; i < 64; i++) {
+        cout << "OUTPUT WAS: " << (unsigned int*)out_buf[i] << endl;
+    }
+    //cout << "OUTPUT WAS: " << (unsigned int*)out_buf[0] << endl;
     cout << "CSR0 output was " << csrs.readCSR(0) << endl;
-   // for (int i = 0; i < getpagesize(); i++) {
-   //     cout << buf[i];
-   // }
 
     // Ask the FPGA-side CSR manager the AFU's frequency
     cout << endl
