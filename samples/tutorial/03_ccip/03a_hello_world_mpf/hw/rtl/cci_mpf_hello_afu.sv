@@ -60,13 +60,7 @@ module app_afu
         reset <= fiu.reset;
     end
 
-
-    // ====================================================================
-    //
-    //  CSRs (simple connections to the external CSR management engine)
-    //
-    // ====================================================================
-
+    // Chisel Module signals
     logic chisel_wrEnable;
     logic [9:0] chisel_wrAddr;
     logic [63:0] chisel_wrData_0;
@@ -78,27 +72,10 @@ module app_afu
     logic [63:0] chisel_rdData_2;
     logic [63:0] chisel_rdData_3;
     logic [9:0] chisel_rdAddr;
-    //assign chisel_rdAddr = 10'h1;
-
     
-    //
-    // Consume configuration CSR writes
-    //
-
-    // We use CSR 0 to set the memory address.
+    // We use CSR 0 to set the AFU read buffer memory address.
     logic is_rd_addr_csr_write;
     assign is_rd_addr_csr_write = csrs.cpu_wr_csrs[0].en;
-
-    // Memory address to which this AFU will read 
-//    t_ccip_clAddr  rd_addr ;
-//
-//    always_ff @(posedge clk)
-//    begin
-//        if (is_ rd_addr _csr_write)
-//        begin
-//            rd_addr<= t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data);
-//        end
-//    end
 
     // Use CSR 1 to set memory address for which AFU will write
     logic is_wr_addr_csr_write;
@@ -139,14 +116,14 @@ module app_afu
         else
         begin
             // Trigger the AFU when rd_addr is set above.  (When the CPU
-            // tells us the address of the FPGA shared memory buffer 
+            // tells us the address of the FPGA read shared memory buffer 
             if ((state == STATE_IDLE) && is_rd_addr_csr_write)
             begin
                 state <= STATE_READ_DATA;
                 $display("AFU Reading...");
             end
 
-            // The AFU READS data into SRAM
+            // The AFU READS data into chisel BRAM
             if ((state == STATE_READ_DATA && cci_c0Rx_isReadRsp(fiu.c0Rx)) && chisel_wrAddr == 10'h2)
             begin
                 state <= STATE_WRITE_DATA;
@@ -164,9 +141,7 @@ module app_afu
 
             if(state == STATE_FINISHED)
             begin
-
             end
-
        end
     end
 
@@ -197,12 +172,7 @@ module app_afu
     // Construct a memory read header
     t_cci_mpf_c0_ReqMemHdr rd_hdr;
     t_cci_mpf_ReqMemHdrParams rd_hdr_params;
-
     t_ccip_clAddr  rd_addr;
-
-    // Increment read address by 64 (1 cacheline)
-//    always_ff @(posedge clk)
-//        rd_addr <= is_rd_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data) : rd_addr + 64'h40;
 
     always_comb
     begin
@@ -220,14 +190,16 @@ module app_afu
                                         rd_hdr_params);
     end
 
-    // Send read requests to FIU
+    // Send read requests and handle read responses, only one request inflight at a time 
     always_ff @(posedge clk)
     begin
         if (reset || state == STATE_IDLE)
         begin
             fiu.c0Tx.valid <= 1'b0;
-            chisel_wrAddr <= 10'd1023; // first write will wrap around to 0
             rd_inflight <= 1'b0;
+            rd_addr <= is_rd_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data) : rd_addr;
+            chisel_wrEnable <= 1'b0;
+            chisel_wrAddr <= state == STATE_IDLE ? 10'd1023 : chisel_wrAddr; // first write will wrap around to 0
         end
         else begin
             // Generate a read request when FIU isn't full and a read request isn't already in flight
@@ -235,55 +207,48 @@ module app_afu
                 fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b1);
                 $display("  Sent Read request with addr 0x%x", rd_addr);
                 rd_inflight <= 1'b1;
-
+                rd_addr <= is_rd_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data) : rd_addr;
+            end
+            // Read Response handling
+            else if (rd_inflight && cci_c0Rx_isReadRsp(fiu.c0Rx) && state == STATE_READ_DATA)
+            begin
+                chisel_wrEnable <= 1'b1;
+                chisel_wrData_0 <= fiu.c0Rx.data[63:0];
+                chisel_wrData_1 <= fiu.c0Rx.data[127:64];
+                chisel_wrData_2 <= fiu.c0Rx.data[191:128];
+                chisel_wrData_3 <= fiu.c0Rx.data[255:192];
+                chisel_wrAddr <= chisel_wrAddr + 10'b1;
+                rd_addr <= rd_addr + 64'h1; // cci address is 64-byte aligned!
+                rd_inflight <= 1'b0;
+                $display("  Read data Hex: 0x%x", fiu.c0Rx.data[511:0]);
+                $display("  Chisel wrAddr: 0x%x", chisel_wrAddr+10'b1);
+                fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b0);
             end
             else
+            begin
+                chisel_wrEnable <= 1'b0;
+                rd_addr <= is_rd_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data) : rd_addr;
+                chisel_wrAddr <= state == STATE_IDLE ? 10'd1023 : chisel_wrAddr; // first write will wrap around to 0
                 fiu.c0Tx <= cci_mpf_genC0TxReadReq(rd_hdr, 1'b0);
+            end
         end
     end 
-
-
-    // Read Response handling
-
-    always_ff @(posedge clk) 
-    begin
-        if (cci_c0Rx_isReadRsp(fiu.c0Rx) && state == STATE_READ_DATA)
-        begin
-            chisel_wrEnable <= 1'b1;
-            chisel_wrData_0 <= fiu.c0Rx.data[63:0];
-            chisel_wrData_1 <= fiu.c0Rx.data[127:64];
-            chisel_wrData_2 <= fiu.c0Rx.data[191:128];
-            chisel_wrData_3 <= fiu.c0Rx.data[255:192];
-            chisel_wrAddr <= chisel_wrAddr + 10'b1;
-            rd_addr <= rd_addr + 64'h1; // cci address is 64-byte aligned!
-            rd_inflight <= 1'b0;
-            $display("  Read data Hex: 0x%x", fiu.c0Rx.data[511:0]);
-            $display("  Chisel wrAddr: 0x%x", chisel_wrAddr+10'b1);
-        end
-        else
-        begin
-            chisel_wrEnable <= 1'b0;
-            rd_addr <= is_rd_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[0].data) : rd_addr;
-        end
-    end
-    
-
 
     //
     // Write shared memory from SRAM back to shared buf in STATE_WRITE_DATA
     //
     
-    // Construct a memory write request header.  For this AFU it is always
-    // the same, since we write to only one address.
+    // Construct a memory write request header.
     t_cci_mpf_c1_ReqMemHdr wr_hdr;
     assign wr_hdr = cci_mpf_c1_genReqHdr(eREQ_WRLINE_I,
                                          wr_addr,
                                          t_cci_mdata'(0),
                                          cci_mpf_defaultReqHdrParams());
 
+    // Right now chisel module only accepts 4 8-byte values, so top 4 bytes of c1Tx is padded
     assign fiu.c1Tx.data = t_ccip_clData'({chisel_rdData_3, chisel_rdData_2, chisel_rdData_1, chisel_rdData_0});
 
-    // Control logic for memory write requests
+    // Control logic for memory write requests / write responses
     always_ff @(posedge clk)
     begin
         if (reset || state != STATE_WRITE_DATA)
@@ -291,6 +256,7 @@ module app_afu
             fiu.c1Tx.valid <= 1'b0;
             wr_inflight <= 1'b0;
             chisel_rdAddr <= 10'b0;
+            wr_addr <= is_wr_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data) : wr_addr;
         end
         else
         begin
@@ -298,35 +264,30 @@ module app_afu
             fiu.c1Tx.valid <= ((state == STATE_WRITE_DATA) && ! fiu.c1TxAlmFull && !wr_inflight);
             if ((state == STATE_WRITE_DATA) && ! fiu.c1TxAlmFull && !wr_inflight)
             begin
-                //write_sent <= 1'b1;
                 wr_inflight <= 1'b1;
                 $display("  sent Write request to addr %0h", wr_addr);
                 $display("  writen data was: %0h", fiu.c1Tx.data);
                 $display("  chisel_rdAddr was: %0h", chisel_rdAddr);
                 $display("  chisel_wrEnable was: %d", chisel_wrEnable);
                 chisel_rdAddr <= chisel_rdAddr + 1'b1;
+                wr_addr <= is_wr_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data) : wr_addr;
             end
+            // Handle Write Acks
+            else if (wr_inflight && cci_c1Rx_isWriteRsp(fiu.c1Rx))
+            begin
+                 $display("Received write ack for wr_addr: 0x%x", wr_addr);
+                wr_inflight <= 1'b0;
+                wr_addr <= wr_addr + 64'h1;
+            end
+            else
+                wr_addr <= is_wr_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data) : wr_addr;
         end
 
         fiu.c1Tx.hdr <= wr_hdr;
     end
 
-
-    // Handle write acks
-    always_ff @(posedge clk)
-    begin
-        if (cci_c1Rx_isWriteRsp(fiu.c1Rx))
-        begin
-            $display("Received write ack for wr_addr: 0x%x", wr_addr);
-            wr_inflight <= 1'b0;
-            wr_addr <= wr_addr + 64'h1;
-        end
-        else
-            wr_addr <= is_wr_addr_csr_write ? t_ccip_clAddr'(csrs.cpu_wr_csrs[1].data) : wr_addr;
-    end
-
     //
-    // This AFU never handles MMIO reads.
+    // This AFU never handles MMIO reads, MMIO is managed by CSR module
     //
     assign fiu.c2Tx.mmioRdValid = 1'b0;
 
@@ -368,4 +329,3 @@ module app_afu
     );
 
 endmodule : app_afu // app_afu
-
