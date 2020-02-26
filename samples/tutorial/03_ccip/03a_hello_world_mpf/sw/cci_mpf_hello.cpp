@@ -66,14 +66,21 @@ int main(int argc, char *argv[])
     assert(NULL != out_buf);
 
     // Write a 1 to accelerator
-    buf[0] = 1;
+    //buf[0] = 1;
     //out_buf[0] = 0;
 
     // Write 4 cache-lines worth of data to accelerator (1-CL = 64 Bytes = 16 Ints = 8 long longs)
-    // top 256 bits should be padded with 0
-    for (int i = 0; i < 32; i++) {
-         buf[i] = static_cast<unsigned long long>(i);
+    // top 256 bits should be padded with 1s
+    int data_counter =1;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            buf[i*8+j] = static_cast<unsigned long long>(data_counter++); // data
+        }
+        for (int j = 4; j < 8; j++) {
+            buf[i*8+j] = static_cast<unsigned long long>(0xFFFFFFFFFFFFFFFF); // padding
+        }
      }
+
 
     // Initializes csr 2 to 0, will use to indicate AFU is finished
     // csrs.writeCSR(2, 0)
@@ -85,8 +92,11 @@ int main(int argc, char *argv[])
     csrs.writeCSR(1, out_buf_pa / CL(1));
     csrs.writeCSR(0, buf_pa / CL(1));
 
+    // Writing to buf[0] kicks off the accelerator
+    //buf[0] = static_cast<unsigned long long>();
+
     // Spin, waiting for the value in memory to change to something non-zero.
-    while (0 == out_buf[0])
+    while (0 == out_buf[24])
 
     // Spin, waiting for the last bit of CSR 1 to flip from 0 to 1
     //while (!(csrs.readCSR(0) && 0x01))
@@ -97,8 +107,8 @@ int main(int argc, char *argv[])
 
     // Print the string written by the FPGA
     //cout << (char*)buf << endl;
-    for (int i = 0; i < 64; i++) {
-        cout << "OUTPUT WAS: " << (unsigned int*)out_buf[i] << endl;
+    for (int i = 0; i < 32; i++) {
+        cout << "OUTPUT WAS: " << (unsigned long long*)out_buf[i] << endl;
     }
     //cout << "OUTPUT WAS: " << (unsigned int*)out_buf[0] << endl;
     cout << "CSR0 output was " << csrs.readCSR(0) << endl;
